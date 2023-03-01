@@ -1,22 +1,27 @@
 package com.tntmodders.transporter;
 
 import com.mojang.logging.LogUtils;
+import com.tntmodders.transporter.block.GuidepostBlock;
+import com.tntmodders.transporter.item.RoadItem;
+import com.tntmodders.transporter.logic.TransportData;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.material.Material;
-import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.common.capabilities.Capability;
+import net.minecraftforge.common.capabilities.CapabilityManager;
+import net.minecraftforge.common.capabilities.CapabilityToken;
+import net.minecraftforge.event.AttachCapabilitiesEvent;
 import net.minecraftforge.event.CreativeModeTabEvent;
-import net.minecraftforge.event.server.ServerStartingEvent;
-import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
-import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -27,43 +32,41 @@ import org.slf4j.Logger;
 public class Transporter {
     public static final String MOD_ID = "transporter";
     public static final DeferredRegister<Block> BLOCKS = DeferredRegister.create(ForgeRegistries.BLOCKS, MOD_ID);
-    public static final RegistryObject<Block> EXAMPLE_BLOCK = BLOCKS.register("example_block", () -> new Block(BlockBehaviour.Properties.of(Material.STONE)));
+    public static final RegistryObject<Block> GUIDEPOST = BLOCKS.register("guidepost", () -> new GuidepostBlock(BlockBehaviour.Properties.of(Material.METAL).sound(SoundType.METAL).strength(5.0f, 6.0f).requiresCorrectToolForDrops()));
     public static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, MOD_ID);
-    public static final RegistryObject<Item> EXAMPLE_BLOCK_ITEM = ITEMS.register("example_block", () -> new BlockItem(EXAMPLE_BLOCK.get(), new Item.Properties()));
+    public static final RegistryObject<Item> GUIDEPOST_ITEM = ITEMS.register("guidepost", () -> new BlockItem(GUIDEPOST.get(), new Item.Properties()));
+    public static final RegistryObject<Item> ROAD = ITEMS.register("road", () -> new RoadItem(new Item.Properties()));
+    public static final Capability<TransportData> TRANSPORT = CapabilityManager.get(new CapabilityToken<>() {
+    });
     private static final Logger LOGGER = LogUtils.getLogger();
 
     public Transporter() {
-        IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
-
-        modEventBus.addListener(this::commonSetup);
-
+        var modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
+        modEventBus.addListener(this::addCreative);
         BLOCKS.register(modEventBus);
         ITEMS.register(modEventBus);
-
         MinecraftForge.EVENT_BUS.register(this);
-
-        modEventBus.addListener(this::addCreative);
-    }
-
-    private void commonSetup(final FMLCommonSetupEvent event) {
-        LOGGER.info("HELLO FROM COMMON SETUP");
-        LOGGER.info("DIRT BLOCK >> {}", ForgeRegistries.BLOCKS.getKey(Blocks.DIRT));
     }
 
     private void addCreative(CreativeModeTabEvent.BuildContents event) {
-        if (event.getTab() == CreativeModeTabs.BUILDING_BLOCKS)
-            event.accept(EXAMPLE_BLOCK_ITEM);
+        if (event.getTab() == CreativeModeTabs.FUNCTIONAL_BLOCKS)
+            event.accept(GUIDEPOST_ITEM);
+        if (event.getTab() == CreativeModeTabs.TOOLS_AND_UTILITIES)
+            event.accept(ROAD);
     }
 
     @SubscribeEvent
-    public void onServerStarting(ServerStartingEvent event) {
-        LOGGER.info("HELLO from server starting");
+    public void attachCaps(AttachCapabilitiesEvent<Level> event) {
+        if (!event.getObject().isClientSide) {
+            event.addCapability(new ResourceLocation(MOD_ID, "transport"), new TransportData());
+            LOGGER.debug("Attached capability.");
+        }
     }
 
-    @Mod.EventBusSubscriber(modid = MOD_ID, bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
-    public static class ClientModEvents {
-        @SubscribeEvent
-        public static void onClientSetup(FMLClientSetupEvent event) {
+    @SubscribeEvent
+    public void levelTick(TickEvent.LevelTickEvent event) {
+        if (event.phase == TickEvent.Phase.START) {
+            event.level.getCapability(TRANSPORT).ifPresent(data -> data.update(event.level));
         }
     }
 }
