@@ -29,6 +29,9 @@ import org.slf4j.Logger;
 import javax.annotation.Nullable;
 import java.util.List;
 
+/**
+ * 道のアイテム。
+ */
 public class RoadItem extends Item {
     private static final Logger LOGGER = LogUtils.getLogger();
 
@@ -43,12 +46,15 @@ public class RoadItem extends Item {
 
     @Override
     public void inventoryTick(ItemStack stack, Level level, Entity entity, int slot, boolean isSelected) {
+        // 更新時、座標が保存されていたらパーティクルを表示する。
         var tag = stack.getOrCreateTagElement("road");
         if (!level.isClientSide || !isSelected || !tag.contains("coord")) return;
         if (!level.dimension().location().toString().equals(tag.getString("dimension"))) return;
+        // 基本的にパーティクルはプレイヤーに向ける。
         var targetPos = entity.position().add(0.0, entity.getEyeHeight() / 2.0, 0.0);
         var hitResult = Minecraft.getInstance().hitResult;
         if (hitResult instanceof BlockHitResult && hitResult.getType() == HitResult.Type.BLOCK) {
+            // 視線の先に接続可能なブロックがあるなら、パーティクルをそこに向ける。
             var coord = BlockCoord.fromPos(((BlockHitResult) hitResult).getBlockPos());
             if (tryAddRoad(level, coord, tag, true) == Result.SUCCESS) {
                 targetPos = coord.toBlockPos().getCenter();
@@ -64,12 +70,14 @@ public class RoadItem extends Item {
         if (!level.isClientSide) {
             var tag = stack.getOrCreateTagElement("road");
             if (!player.isCrouching()) {
+                // 空に向かって右クリックされたら接続方向を反転させる。
                 if (tag.getBoolean("reversed")) {
                     tag.remove("reversed");
                 } else {
                     tag.putBoolean("reversed", true);
                 }
             } else {
+                // 空に向かってしゃがみながら右クリックされたら保存を破棄する。
                 tag.remove("coord");
                 tag.remove("dimension");
                 tag.remove("reversed");
@@ -81,10 +89,13 @@ public class RoadItem extends Item {
     @Override
     public InteractionResult useOn(UseOnContext context) {
         if (!context.getLevel().isClientSide) {
+            // 座標が保存されていなかったら保存し、保存されていたら接続する。
             var tag = context.getItemInHand().getOrCreateTagElement("road");
             var coord = BlockCoord.fromPos(context.getClickedPos());
             var result = tryAddRoad(context.getLevel(), coord, tag, false);
+            // 接続に成功したらアイテムを消費する。
             if (result == Result.SUCCESS) context.getItemInHand().shrink(1);
+            // 座標が保存されていなかったか、接続に成功したならこの座標を保存する。
             if (result.shouldSave()) {
                 tag.put("coord", coord.toNBT());
                 tag.putString("dimension", context.getLevel().dimension().location().toString());
@@ -96,6 +107,7 @@ public class RoadItem extends Item {
 
     @Override
     public void appendHoverText(ItemStack stack, @Nullable Level level, List<Component> tooltip, TooltipFlag flag) {
+        // 座標が保存されていたらツールチップに表示する。
         var tag = stack.getTagElement("road");
         if (tag == null || !tag.contains("coord") || !tag.contains("dimension")) return;
         var coord = BlockCoord.fromNBT(tag.getCompound("coord"));
@@ -107,13 +119,23 @@ public class RoadItem extends Item {
             message = coord.toString();
         }
         tooltip.add(Component.literal(message).withStyle(ChatFormatting.GRAY));
+        // プレイヤーが保存された座標と異なるディメンションにいたらその旨を表示する。
         if (level == null || !level.dimension().location().toString().equals(dimension)) {
             tooltip.add(Component.literal("Different Dimension").withStyle(ChatFormatting.RED));
         }
     }
 
+    /**
+     * 保存された座標との接続を試みる。
+     *
+     * @param level       現在のディメンション
+     * @param targetCoord 視線の先の座標
+     * @param tag         座標が保存されているNBT
+     * @param simulate    接続を実行しないならtrue
+     * @return 接続を試みた結果
+     */
     private Result tryAddRoad(Level level, BlockCoord targetCoord, CompoundTag tag, boolean simulate) {
-        // 右クリックされたブロックを取得する。
+        // 視線の先のブロックを取得する。
         var targetState = level.getBlockState(targetCoord.toBlockPos());
         var targetBlockEntity = level.getBlockEntity(targetCoord.toBlockPos());
         Node targetNode;
@@ -147,7 +169,7 @@ public class RoadItem extends Item {
         }
         // 向きを判定する。
         long distanceSq = savedCoord.distanceSq(targetCoord);
-        // 右クリックされたブロックが外部接続なら、接続可能か確認する。
+        // 視線の先のブロックが外部接続なら、接続可能か確認する。
         if (targetNode instanceof ExternalStorage) {
             var side = targetCoord.getDirection(savedCoord);
             if (distanceSq == 1 && side == null)
@@ -166,14 +188,15 @@ public class RoadItem extends Item {
                 return Result.TARGET_NOT_SUPPORTED;
         }
         if (simulate) return Result.SUCCESS;
-        return level.getCapability(Transporter.TRANSPORT).map(data -> {
+        // 接続方向を考慮して接続を追加する。
+        return level.getCapability(Transporter.TRANSPORT).map(net -> {
             boolean result;
             if (!tag.getBoolean("reversed")) {
                 var road = new Road(savedCoord, targetCoord);
-                result = data.addRoad(road, savedNode, targetNode);
+                result = net.addRoad(road, savedNode, targetNode);
             } else {
                 var road = new Road(targetCoord, savedCoord);
-                result = data.addRoad(road, targetNode, savedNode);
+                result = net.addRoad(road, targetNode, savedNode);
             }
             if (result) {
                 return Result.SUCCESS;
@@ -183,7 +206,16 @@ public class RoadItem extends Item {
         }).orElse(Result.SUCCESS);
     }
 
+    /**
+     * 2つの座標の間にパーティクルを表示する。
+     *
+     * @param level      パーティクルを出すディメンション
+     * @param savedPos   保存された座標で、通常は接続元
+     * @param targetPos  視線の先の座標で、通常は接続先
+     * @param isReversed 接続方向を反転するか
+     */
     private void spawnParticles(Level level, Vec3 savedPos, Vec3 targetPos, boolean isReversed) {
+        // レッドストーンのパーティクルを流用しているので、移動速度は反映されない。
         var vector = targetPos.subtract(savedPos);
         var length = vector.length();
         var speedFactorLimit = 2.0 / length;

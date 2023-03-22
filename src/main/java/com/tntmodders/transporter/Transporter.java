@@ -3,7 +3,7 @@ package com.tntmodders.transporter;
 import com.mojang.logging.LogUtils;
 import com.tntmodders.transporter.block.GuidepostBlock;
 import com.tntmodders.transporter.item.RoadItem;
-import com.tntmodders.transporter.logic.TransportData;
+import com.tntmodders.transporter.logic.TransportNet;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTabs;
@@ -32,11 +32,22 @@ import org.slf4j.Logger;
 public class Transporter {
     public static final String MOD_ID = "transporter";
     public static final DeferredRegister<Block> BLOCKS = DeferredRegister.create(ForgeRegistries.BLOCKS, MOD_ID);
-    public static final RegistryObject<Block> GUIDEPOST = BLOCKS.register("guidepost", () -> new GuidepostBlock(BlockBehaviour.Properties.of(Material.METAL).sound(SoundType.METAL).strength(5.0f, 6.0f).requiresCorrectToolForDrops()));
+    public static final RegistryObject<Block> GUIDEPOST = BLOCKS.register("guidepost",
+            () -> new GuidepostBlock(
+                    BlockBehaviour.Properties.of(Material.METAL)
+                            .sound(SoundType.METAL)
+                            .strength(5.0f, 6.0f)
+                            .requiresCorrectToolForDrops()
+            ));
     public static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, MOD_ID);
-    public static final RegistryObject<Item> GUIDEPOST_ITEM = ITEMS.register("guidepost", () -> new BlockItem(GUIDEPOST.get(), new Item.Properties()));
-    public static final RegistryObject<Item> ROAD = ITEMS.register("road", () -> new RoadItem(new Item.Properties()));
-    public static final Capability<TransportData> TRANSPORT = CapabilityManager.get(new CapabilityToken<>() {
+    public static final RegistryObject<Item> GUIDEPOST_ITEM = ITEMS.register("guidepost",
+            () -> new BlockItem(GUIDEPOST.get(), new Item.Properties()));
+    public static final RegistryObject<Item> ROAD = ITEMS.register("road",
+            () -> new RoadItem(new Item.Properties()));
+    /**
+     * 輸送網のCapability。
+     */
+    public static final Capability<TransportNet> TRANSPORT = CapabilityManager.get(new CapabilityToken<>() {
     });
     private static final Logger LOGGER = LogUtils.getLogger();
 
@@ -45,6 +56,7 @@ public class Transporter {
         modEventBus.addListener(this::addCreative);
         BLOCKS.register(modEventBus);
         ITEMS.register(modEventBus);
+        // このクラスの@SubscribeEventがついたメソッドを登録する。
         MinecraftForge.EVENT_BUS.register(this);
     }
 
@@ -57,16 +69,18 @@ public class Transporter {
 
     @SubscribeEvent
     public void attachCaps(AttachCapabilitiesEvent<Level> event) {
+        // サーバー側のそれぞれのディメンションに輸送網の情報を付与する。
         if (!event.getObject().isClientSide) {
-            event.addCapability(new ResourceLocation(MOD_ID, "transport"), new TransportData());
+            event.addCapability(new ResourceLocation(MOD_ID, "transport"), new TransportNet());
             LOGGER.debug("Attached capability.");
         }
     }
 
     @SubscribeEvent
     public void levelTick(TickEvent.LevelTickEvent event) {
+        // 各ディメンションの更新時に輸送網を更新する。
         if (event.phase == TickEvent.Phase.START) {
-            event.level.getCapability(TRANSPORT).ifPresent(data -> data.update(event.level));
+            event.level.getCapability(TRANSPORT).ifPresent(net -> net.update(event.level));
         }
     }
 }
